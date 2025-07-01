@@ -585,16 +585,13 @@ private:
             SmallVector<Value> fullIndices;
 
             // Build indices based on the structure of the indices tensor
-            if (indexVectorDim == 0 && indicesType.getRank() == 1) {
-              // Special case: 1D indices tensor with index_vector_dim=0
-              // For gathering, we use the first batch dimension (output dim 0)
-              fullIndices.push_back(outputIndices[0]);
-            } else if (indexVectorDim ==
-                       static_cast<int64_t>(indicesType.getRank())) {
+            if (indexVectorDim == static_cast<int64_t>(indicesType.getRank())) {
               // Index vector is implicit (size 1)
               // Use batch dimensions from output
               for (auto batchDim : batchDims) {
-                fullIndices.push_back(outputIndices[batchDim]);
+                if (static_cast<size_t>(batchDim) < outputIndices.size()) {
+                  fullIndices.push_back(outputIndices[batchDim]);
+                }
               }
             } else {
               // Normal case: index vector is at a specific dimension
@@ -607,7 +604,8 @@ private:
                       b.create<arith::ConstantIndexOp>(loc, i));
                 } else {
                   // This is a batch dimension
-                  if (static_cast<size_t>(batchIdx) < batchDims.size()) {
+                  if (static_cast<size_t>(batchIdx) < batchDims.size() &&
+                      static_cast<size_t>(batchDims[batchIdx]) < outputIndices.size()) {
                     fullIndices.push_back(outputIndices[batchDims[batchIdx]]);
                     batchIdx++;
                   }
@@ -640,7 +638,11 @@ private:
               idx = idxValue;
             }
 
-            inputIndices[startIndexMap[i]] = idx;
+            // Bounds check before assignment
+            int64_t targetIdx = startIndexMap[i];
+            if (targetIdx >= 0 && targetIdx < inputType.getRank()) {
+              inputIndices[targetIdx] = idx;
+            }
           }
 
           // Map offset dimensions from output to input
@@ -648,6 +650,11 @@ private:
           // input dimension
           for (size_t i = 0; i < offsetDims.size(); ++i) {
             int64_t outputDim = offsetDims[i];
+            
+            // Bounds check for outputDim
+            if (outputDim < 0 || static_cast<size_t>(outputDim) >= outputIndices.size()) {
+              continue;
+            }
 
             // Find the corresponding input dimension
             // We need to skip over gathered dimensions and collapsed dimensions
@@ -655,17 +662,18 @@ private:
             int64_t nonCollapsedCount = 0;
 
             // Count non-collapsed dimensions until we reach the i-th one
-            while (inputDim < inputType.getRank() &&
-                   static_cast<size_t>(nonCollapsedCount) <= i) {
+            for (inputDim = 0; inputDim < inputType.getRank(); ++inputDim) {
               if (!llvm::is_contained(collapsedSliceDims, inputDim) &&
                   !llvm::is_contained(startIndexMap, inputDim)) {
                 if (static_cast<size_t>(nonCollapsedCount) == i) {
-                  inputIndices[inputDim] = outputIndices[outputDim];
+                  // Bounds check before assignment
+                  if (inputDim >= 0 && inputDim < inputType.getRank()) {
+                    inputIndices[inputDim] = outputIndices[outputDim];
+                  }
                   break;
                 }
                 nonCollapsedCount++;
               }
-              inputDim++;
             }
           }
 
