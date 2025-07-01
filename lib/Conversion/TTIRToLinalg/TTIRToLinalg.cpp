@@ -584,7 +584,7 @@ private:
           for (size_t i = 0; i < startIndexMap.size(); ++i) {
             SmallVector<Value> fullIndices;
 
-            // Build indices based on the structure of the indices tensor
+            // Build indices with additional bounds checking to prevent segfaults
             if (indexVectorDim == static_cast<int64_t>(indicesType.getRank())) {
               // Index vector is implicit (size 1)
               // Use batch dimensions from output
@@ -603,7 +603,7 @@ private:
                   fullIndices.push_back(
                       b.create<arith::ConstantIndexOp>(loc, i));
                 } else {
-                  // This is a batch dimension
+                  // This is a batch dimension - add bounds checking
                   if (static_cast<size_t>(batchIdx) < batchDims.size() &&
                       static_cast<size_t>(batchDims[batchIdx]) < outputIndices.size()) {
                     fullIndices.push_back(outputIndices[batchDims[batchIdx]]);
@@ -638,7 +638,7 @@ private:
               idx = idxValue;
             }
 
-            // Bounds check before assignment
+            // Bounds check before assignment to prevent segfaults
             int64_t targetIdx = startIndexMap[i];
             if (targetIdx >= 0 && targetIdx < inputType.getRank()) {
               inputIndices[targetIdx] = idx;
@@ -651,7 +651,7 @@ private:
           for (size_t i = 0; i < offsetDims.size(); ++i) {
             int64_t outputDim = offsetDims[i];
             
-            // Bounds check for outputDim
+            // Bounds check for outputDim to prevent segfaults
             if (outputDim < 0 || static_cast<size_t>(outputDim) >= outputIndices.size()) {
               continue;
             }
@@ -661,7 +661,7 @@ private:
             int64_t inputDim = 0;
             int64_t nonCollapsedCount = 0;
 
-            // Count non-collapsed dimensions until we reach the i-th one
+            // Count non-collapsed dimensions using safer for loop instead of while
             for (inputDim = 0; inputDim < inputType.getRank(); ++inputDim) {
               if (!llvm::is_contained(collapsedSliceDims, inputDim) &&
                   !llvm::is_contained(startIndexMap, inputDim)) {
